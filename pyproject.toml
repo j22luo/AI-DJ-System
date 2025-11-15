@@ -8,8 +8,11 @@ dependencies = [
     "config>=0.5.1",
     "dotenv>=0.9.9",
     "httpx>=0.28.1",
+    "matplotlib>=3.10.7",
     "mcp[cli]>=1.21.1",
+    "numpy>=2.3.4",
     "services>=0.1.1",
+    "sounddevice>=0.5.3",
     "spotipy>=2.25.1",
 ]
 

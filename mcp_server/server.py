@@ -1,4 +1,4 @@
-from mcp.server import Server
+from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool, TextContent
 import asyncio
 import json
@@ -8,7 +8,7 @@ from services.audio_analysis import MicDBFFrequencyMonitor
 # from services.crowd_vision_service import CrowdVisionService
 # from shared.state_manager import state
 
-app = Server("houseparty-dj-mcp")
+app = FastMCP("houseparty-dj-mcp")
 
 # Initialize services
 spotify_service = SpotifyService()
@@ -143,3 +143,6 @@ if __name__ == "__main__":
             await app.run(read_stream, write_stream, app.create_initialization_options())
     
     asyncio.run(main())
+
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_current_track_audio_features","arguments":{}}}

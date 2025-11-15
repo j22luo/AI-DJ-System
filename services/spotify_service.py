@@ -23,7 +23,7 @@ class SpotifyService():
             client_id=Config.SPOTIFY_CLIENT_ID,
             client_secret=Config.SPOTIFY_CLIENT_SECRET,
             redirect_uri=Config.SPOTIFY_REDIRECT_URI,
-            scope="user-library-read user-read-playback-state user-modify-playback-state",
+            scope="user-library-read user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative",
             cache_path=str(cache_path),  # Use absolute path
             open_browser=False
         ))
@@ -40,16 +40,6 @@ class SpotifyService():
             )
         self._queue_tasks = {}
 
-        try:
-            self.sp.current_user()
-            print(f"✅ Authenticated with Spotify (cache: {cache_path})")
-        except Exception as e:
-            raise ConnectionError(
-                f"Spotify authentication failed: {e}\n"
-                f"Cache location: {cache_path}\n"
-                "Your token may have expired. Run 'python authenticate_spotify.py' again."
-            )
-
     # Claude Tools
 
     async def get_current_track_audio_features(self) -> Optional[Dict]:
@@ -60,10 +50,13 @@ class SpotifyService():
             return None
         
         track = playback['item']
-        track_id = playback['item']['id']
+        track_id = track['id']
 
-        features = await loop.run_in_executor(None, self.sp.audio_features, track_id)
+        print(track_id)
 
+        features = await loop.run_in_executor(None, self.sp.audio_features, [track_id])
+
+        print(features)
         f = features[0]
         return {
             'energy': f['energy'],
