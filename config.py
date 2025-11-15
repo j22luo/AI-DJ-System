@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class Config:
     # Spotify
     SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")

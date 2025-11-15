@@ -3,19 +3,52 @@ from spotipy.oauth2 import SpotifyOAuth
 from typing import Optional, List, Dict
 import asyncio
 from config import Config
+from pathlib import Path
 
 class SpotifyService():
     """API Wrapper for interacting with Spotify"""
     def __init__(self):
+        # Get absolute path to project root
+        project_root = Path(__file__).parent.parent
+        cache_path = project_root / ".spotify_cache"
+        
+        # Check if token cache exists
+        if not cache_path.exists():
+            raise FileNotFoundError(
+                f"Spotify token cache not found at: {cache_path}\n"
+                "Please run 'python authenticate_spotify.py' first to authenticate."
+            )
+        
         self.sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
             client_id=Config.SPOTIFY_CLIENT_ID,
             client_secret=Config.SPOTIFY_CLIENT_SECRET,
             redirect_uri=Config.SPOTIFY_REDIRECT_URI,
             scope="user-library-read user-read-playback-state user-modify-playback-state",
-            cache_path=".spotify_cache",
-            open_browser=True  # Will open browser
+            cache_path=str(cache_path),  # Use absolute path
+            open_browser=False
         ))
+        
+        # Validate token works
+        try:
+            self.sp.current_user()
+            print(f"✅ Authenticated with Spotify (cache: {cache_path})")
+        except Exception as e:
+            raise ConnectionError(
+                f"Spotify authentication failed: {e}\n"
+                f"Cache location: {cache_path}\n"
+                "Your token may have expired. Run 'python authenticate_spotify.py' again."
+            )
         self._queue_tasks = {}
+
+        try:
+            self.sp.current_user()
+            print(f"✅ Authenticated with Spotify (cache: {cache_path})")
+        except Exception as e:
+            raise ConnectionError(
+                f"Spotify authentication failed: {e}\n"
+                f"Cache location: {cache_path}\n"
+                "Your token may have expired. Run 'python authenticate_spotify.py' again."
+            )
 
     # Claude Tools
 
