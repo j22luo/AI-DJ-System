@@ -1,5 +1,5 @@
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
+from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 from typing import Optional, List, Dict
 import asyncio
 from config import Config
@@ -19,11 +19,12 @@ class SpotifyService():
                 "Please run 'python authenticate_spotify.py' first to authenticate."
             )
         
+        # User-authenticated client for playback and user data
         self.sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
             client_id=Config.SPOTIFY_CLIENT_ID,
             client_secret=Config.SPOTIFY_CLIENT_SECRET,
             redirect_uri=Config.SPOTIFY_REDIRECT_URI,
-            scope="user-library-read user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative",
+            scope="user-library-read user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative",
             cache_path=str(cache_path),  # Use absolute path
             open_browser=False
         ))
@@ -38,7 +39,7 @@ class SpotifyService():
                 f"Cache location: {cache_path}\n"
                 "Your token may have expired. Run 'python authenticate_spotify.py' again."
             )
-        self._queue_tasks = {}
+        self._play_tasks = {}
 
     # Claude Tools
 
@@ -52,24 +53,108 @@ class SpotifyService():
         track = playback['item']
         track_id = track['id']
 
-        print(track_id)
 
-        features = await loop.run_in_executor(None, self.sp.audio_features, [track_id])
+        try:
+            analysis = await loop.run_in_executor(None, self.sp.audio_analysis, track_id)
 
-        print(features)
-        f = features[0]
-        return {
-            'energy': f['energy'],
-            'danceability': f['danceability'],
-            'valence': f['valence'],
-            'tempo': f['tempo'],
-            'loudness': f['loudness'],
-            'acousticness': f['acousticness'],
-            'instrumentalness': f['instrumentalness'],
-            'speechiness': f['speechiness'],
-            'duration_ms': track['duration_ms'],
-            'progress_ms': playback.get('progress_ms', 0),
-        }
+            # Extract key DJ-relevant metadata for party/mixing context
+            track_data = analysis['track']
+            sections = analysis.get('sections', [])
+            segments = analysis.get('segments', [])
+            
+            # Calculate average segment characteristics for overall vibe
+            avg_loudness = sum(s.get('loudness_max', 0) for s in segments[:20]) / min(len(segments), 20) if segments else 0
+            avg_timbre = [sum(s.get('timbre', [0]*12)[i] for s in segments[:20]) / min(len(segments), 20) for i in range(12)] if segments else [0]*12
+            
+            # Get section types for track structure understanding
+            section_types = [s.get('loudness', 0) for s in sections] if sections else []
+            
+            return {
+                'tempo': track_data.get('tempo'),
+                'key': track_data.get('key'),  # 0-11 (C, C#, D, etc.)
+                'mode': track_data.get('mode'),  # 0=minor, 1=major
+                'time_signature': track_data.get('time_signature'),
+                'loudness': track_data.get('loudness'),
+                'duration_ms': int(track_data.get('duration') * 1000) if track_data.get('duration') else track['duration_ms'],
+                'progress_ms': playback.get('progress_ms', 0),
+                
+                # Party/DJ relevant characteristics
+                'avg_segment_loudness': avg_loudness,  # Energy level throughout song
+                'timbre_profile': avg_timbre[:4],  # First 4 timbre coefficients (brightness, fullness, etc.)
+                'num_sections': len(sections),  # Track complexity/structure
+                'section_loudness_variation': max(section_types) - min(section_types) if section_types else 0,  # Dynamic range
+                
+                # Basic track info for context
+                'track_name': track['name'],
+                'artist': ', '.join([a['name'] for a in track['artists']]),
+                'popularity': track.get('popularity', 0),
+                'track_id': track_id
+            }
+            
+        except Exception as e:
+            print(f"⚠️  Audio analysis failed: {e}")
+            # Fallback to basic track info
+            return {
+                'error': 'audio_analysis_failed',
+                'duration_ms': track['duration_ms'],
+                'progress_ms': playback.get('progress_ms', 0),
+                'track_name': track['name'],
+                'artist': ', '.join([a['name'] for a in track['artists']]),
+                'popularity': track.get('popularity', 0),
+                'track_id': track_id
+            }
+        
+    async def get_track_audio_features(self, track_id: str) -> Optional[Dict]:
+        loop = asyncio.get_event_loop()
+        try:
+            analysis = await loop.run_in_executor(None, self.sp.audio_analysis, track_id)
+
+            # Extract key DJ-relevant metadata for party/mixing context
+            track_data = analysis['track']
+            sections = analysis.get('sections', [])
+            segments = analysis.get('segments', [])
+            
+            # Calculate average segment characteristics for overall vibe
+            avg_loudness = sum(s.get('loudness_max', 0) for s in segments[:20]) / min(len(segments), 20) if segments else 0
+            avg_timbre = [sum(s.get('timbre', [0]*12)[i] for s in segments[:20]) / min(len(segments), 20) for i in range(12)] if segments else [0]*12
+            
+            # Get section types for track structure understanding
+            section_types = [s.get('loudness', 0) for s in sections] if sections else []
+            
+            return {
+                'tempo': track_data.get('tempo'),
+                'key': track_data.get('key'),  # 0-11 (C, C#, D, etc.)
+                'mode': track_data.get('mode'),  # 0=minor, 1=major
+                'time_signature': track_data.get('time_signature'),
+                'loudness': track_data.get('loudness'),
+                'duration_ms': int(track_data.get('duration') * 1000) if track_data.get('duration') else track['duration_ms'],
+                'progress_ms': playback.get('progress_ms', 0),
+                
+                # Party/DJ relevant characteristics
+                'avg_segment_loudness': avg_loudness,  # Energy level throughout song
+                'timbre_profile': avg_timbre[:4],  # First 4 timbre coefficients (brightness, fullness, etc.)
+                'num_sections': len(sections),  # Track complexity/structure
+                'section_loudness_variation': max(section_types) - min(section_types) if section_types else 0,  # Dynamic range
+                
+                # Basic track info for context
+                'track_name': track['name'],
+                'artist': ', '.join([a['name'] for a in track['artists']]),
+                'popularity': track.get('popularity', 0),
+                'track_id': track_id
+            }
+            
+        except Exception as e:
+            print(f"⚠️  Audio analysis failed: {e}")
+            # Fallback to basic track info
+            return {
+                'error': 'audio_analysis_failed',
+                'duration_ms': track['duration_ms'],
+                'progress_ms': playback.get('progress_ms', 0),
+                'track_name': track['name'],
+                'artist': ', '.join([a['name'] for a in track['artists']]),
+                'popularity': track.get('popularity', 0),
+                'track_id': track_id
+            }
 
     async def get_test_playlist(self) -> Optional[Dict]:
         """Get tracks from fixed test playlist"""
@@ -114,59 +199,98 @@ class SpotifyService():
             print(f"Error fetching test playlist: {e}")
             return None
 
-    async def queue_track(self, uri: str, offset: float = 0.0) -> bool:
+    async def play_track_after_delay(self, uri: str, delay: float = 0.0) -> bool:
         """
-        Queue a track to play after specified offset time
+        Plays a specific track after a given offset in seconds.
+        Schedules the playback as a background task.
         """
-
         try:
-            if offset <= 0:
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, self.sp.add_to_queue, uri)
-                return True
-            else:
-                # Schedule for later
-                task = asyncio.create_task(self._queue_after_delay(uri, offset))
-                self._queue_tasks[uri] = task
-                return True
-                
+            # Create a background task to handle the delay and playback
+            task = asyncio.create_task(self._play_after_delay(uri, delay))
+            self._play_tasks[uri] = task
+            return True
+            
         except Exception as e:
-            print(f"Error queueing track: {e}")
+            print(f"Error scheduling track playback: {e}")
             return False
 
-    async def get_multiple_audio_features(self, track_ids: List[str]) -> Dict[str, Dict]:
+    async def _play_after_delay(self, uri: str, delay: float):
         """
-        Get audio features for multiple tracks efficiently
+        Internal method to wait for the delay and then start playback.
         """
         try:
-            # Spotify API allows batch fetching up to 100 tracks
+            if delay > 0:
+                await asyncio.sleep(delay)
+            
             loop = asyncio.get_event_loop()
-            features_list = await loop.run_in_executor(
+            playback = await loop.run_in_executor(None, self.sp.current_playback)
+            device_id = playback['device']['id']
+            await loop.run_in_executor(
                 None, 
-                self.sp.audio_features, 
-                track_ids
+                lambda: self.sp.start_playback(uris=[uri], device_id=device_id)
             )
             
-            result = {}
-            for track_id, features in zip(track_ids, features_list):
-                if features:
-                    result[track_id] = {
-                        'energy': features['energy'],
-                        'danceability': features['danceability'],
-                        'valence': features['valence'],
-                        'tempo': features['tempo'],
-                        'loudness': features['loudness'],
-                        'acousticness': features['acousticness'],
-                        'instrumentalness': features['instrumentalness'],
-                        'speechiness': features['speechiness']
-                    }
+            print(f"Started playback of: {uri}")
             
-            return result
-            
+        except asyncio.CancelledError:
+            print(f"Playback task cancelled for: {uri}")
         except Exception as e:
-            print(f"Error getting multiple audio features: {e}")
-            return {}
+            print(f"Error in delayed playback: {e}")
+        finally:
+            # Once the task is done (played or cancelled), remove it from the dict
+            if uri in self._play_tasks:
+                del self._play_tasks[uri]
+
+    # async def get_multiple_audio_features(self, track_ids: List[str]) -> Dict[str, Dict]:
+    #     """
+    #     Get audio features for multiple tracks efficiently
+    #     """
+    #     try:
+    #         # Spotify API allows batch fetching up to 100 tracks
+    #         loop = asyncio.get_event_loop()
+    #         features_list = await loop.run_in_executor(
+    #             None, 
+    #             self.sp_public.audio_features, 
+    #             track_ids
+    #         )
+    #         
+    #         result = {}
+    #         for track_id, features in zip(track_ids, features_list):
+    #             if features:
+    #                 result[track_id] = {
+    #                     'energy': features['energy'],
+    #                     'danceability': features['danceability'],
+    #                     'valence': features['valence'],
+    #                     'tempo': features['tempo'],
+    #                     'loudness': features['loudness'],
+    #                     'acousticness': features['acousticness'],
+    #                     'instrumentalness': features['instrumentalness'],
+    #                     'speechiness': features['speechiness']
+    #                 }
+    #         
+    #         return result
+    #         
+    #     except Exception as e:
+    #         print(f"Error getting multiple audio features: {e}")
+    #         return {}
+    async def cancel_scheduled_play(self, uri: str) -> bool:
+        """
+        Cancel a scheduled play operation
+        """
+        if uri in self._play_tasks:
+            task = self._play_tasks[uri]
+            task.cancel()
+            del self._play_tasks[uri]
+            # The 'finally' block in _play_after_delay will handle deletion
+            print(f"Cancelled scheduled play for: {uri}")
+            return True
+        return False
     
+    async def get_scheduled_play_tracks(self) -> List[str]:
+        """
+        Get list of track URIs that are scheduled to be played
+        """
+        return list(self._play_tasks.keys())
     # Other methods
 
     async def get_current_track(self) -> Optional[Dict]:
@@ -208,41 +332,4 @@ class SpotifyService():
             'instrumentalness': f['instrumentalness'],
             'speechiness': f['speechiness']
         }
-    
-    async def _queue_after_delay(self, uri: str, delay: float):
-        """
-        Internal method to queue track after a delay
-        """
-        try:
-            await asyncio.sleep(delay)
-            
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self.sp.add_to_queue, uri)
-            
-            # Clean up task reference
-            if uri in self._queue_tasks:
-                del self._queue_tasks[uri]
-                
-        except asyncio.CancelledError:
-            print(f"Queue task cancelled for: {uri}")
-        except Exception as e:
-            print(f"Error in delayed queue: {e}")
-    
-    async def cancel_scheduled_queue(self, uri: str) -> bool:
-        """
-        Cancel a scheduled queue operation
-        """
-        if uri in self._queue_tasks:
-            task = self._queue_tasks[uri]
-            task.cancel()
-            del self._queue_tasks[uri]
-            print(f"Cancelled scheduled queue for: {uri}")
-            return True
-        return False
-    
-    async def get_scheduled_tracks(self) -> List[str]:
-        """
-        Get list of track URIs that are scheduled to be queued
-        """
-        return list(self._queue_tasks.keys())
     

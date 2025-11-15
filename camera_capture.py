@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Camera Recorder
 Captures images from laptop camera at 1-second intervals for 5 seconds.
