@@ -160,22 +160,22 @@ class SpotifyService():
         """Get tracks from fixed test playlist"""
         try:
             loop = asyncio.get_event_loop()
-            
+
             playlist = await loop.run_in_executor(
-                None, 
-                self.sp.playlist, 
+                None,
+                self.sp.playlist,
                 Config.SPOTIFY_TEST_PLAYLIST_ID
             )
-            
+
             tracks_data = await loop.run_in_executor(
                 None,
                 self.sp.playlist_tracks,
                 Config.SPOTIFY_TEST_PLAYLIST_ID
             )
-            
+
             tracks = []
             for item in tracks_data['items']:
-                if item['track']:  
+                if item['track']:
                     track = item['track']
                     tracks.append({
                         'id': track['id'],
@@ -187,17 +187,113 @@ class SpotifyService():
                         'album_art': track['album']['images'][0]['url'] if track['album']['images'] else None,
                         'popularity': track.get('popularity', 0)
                     })
-            
+
             return {
                 'id': playlist['id'],
                 'name': playlist['name'],
                 'total_tracks': len(tracks),
                 'tracks': tracks
             }
-            
+
         except Exception as e:
             print(f"Error fetching test playlist: {e}")
             return None
+
+    async def get_playlist_with_audio_features(self, playlist_id: Optional[str] = None) -> List[Dict]:
+        """
+        Get playlist tracks with audio features for DJ decision making.
+
+        Args:
+            playlist_id: Spotify playlist ID (uses test playlist if None)
+
+        Returns:
+            List of track dicts with audio features
+        """
+        try:
+            if playlist_id is None:
+                playlist_id = Config.SPOTIFY_TEST_PLAYLIST_ID
+
+            loop = asyncio.get_event_loop()
+
+            # Get playlist tracks
+            tracks_data = await loop.run_in_executor(
+                None,
+                self.sp.playlist_tracks,
+                playlist_id
+            )
+
+            track_ids = []
+            track_info = {}
+
+            for item in tracks_data['items']:
+                if item['track']:
+                    track = item['track']
+                    track_id = track['id']
+                    track_ids.append(track_id)
+                    track_info[track_id] = {
+                        'id': track_id,
+                        'name': track['name'],
+                        'artist': ', '.join([a['name'] for a in track['artists']]),
+                        'uri': track['uri'],
+                        'duration_ms': track['duration_ms'],
+                        'popularity': track.get('popularity', 0)
+                    }
+
+            # Get audio features for all tracks (batch request)
+            if track_ids:
+                audio_features = await loop.run_in_executor(
+                    None,
+                    self.sp.audio_features,
+                    track_ids
+                )
+
+                # Get audio analysis for tracks (sample a few for performance)
+                # We'll get full analysis for first 10 tracks only
+                sample_ids = track_ids[:10]
+
+                enriched_tracks = []
+                for i, track_id in enumerate(track_ids):
+                    track_data = track_info[track_id].copy()
+
+                    # Add audio features
+                    if audio_features and i < len(audio_features) and audio_features[i]:
+                        af = audio_features[i]
+                        track_data['tempo'] = af.get('tempo', 120)
+                        track_data['key'] = af.get('key', 0)
+                        track_data['mode'] = af.get('mode', 1)
+                        track_data['loudness'] = af.get('loudness', -10)
+                        track_data['energy'] = af.get('energy', 0.5)
+                        track_data['danceability'] = af.get('danceability', 0.5)
+                        track_data['valence'] = af.get('valence', 0.5)
+
+                    # Add simplified analysis data for first 10 tracks
+                    if track_id in sample_ids:
+                        try:
+                            analysis = await loop.run_in_executor(
+                                None,
+                                self.sp.audio_analysis,
+                                track_id
+                            )
+
+                            # Extract avg segment loudness
+                            segments = analysis.get('segments', [])
+                            if segments:
+                                avg_loudness = sum(s.get('loudness_max', -20) for s in segments) / len(segments)
+                                track_data['avg_segment_loudness'] = avg_loudness
+                        except:
+                            pass  # Skip if analysis fails
+
+                    enriched_tracks.append(track_data)
+
+                return enriched_tracks
+
+            return []
+
+        except Exception as e:
+            print(f"Error fetching playlist with audio features: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
     async def play_track_after_delay(self, uri: str, delay: float = 0.0) -> bool:
         """

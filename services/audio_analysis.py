@@ -84,6 +84,12 @@ class MicDBFFrequencyMonitor:
             maxlen=self.max_blocks
         )
 
+        # NEW: Store raw audio samples for advanced analysis
+        # Deque of audio blocks (numpy arrays)
+        self._audio_buffer: Deque[np.ndarray] = deque(
+            maxlen=self.max_blocks
+        )
+
         self._stream: Optional[sd.InputStream] = None
         self._running = False
 
@@ -147,6 +153,9 @@ class MicDBFFrequencyMonitor:
         else:
             audio = indata[:, 0]
 
+        # Store raw audio for advanced analysis
+        self._audio_buffer.append(audio.copy())
+
         audio = audio.astype(np.float32, copy=False)
 
         dbfs = self._compute_dbfs(audio)
@@ -203,9 +212,23 @@ class MicDBFFrequencyMonitor:
         """
         return list(self._history)
 
+    def get_raw_audio_samples(self) -> np.ndarray:
+        """
+        Returns concatenated raw audio samples from the buffer.
+
+        Returns:
+            numpy array of audio samples for the last history_seconds
+        """
+        if not self._audio_buffer:
+            return np.array([])
+
+        # Concatenate all audio blocks into a single array
+        return np.concatenate(list(self._audio_buffer))
+
     def clear_history(self) -> None:
         """Clear all stored samples."""
         self._history.clear()
+        self._audio_buffer.clear()
 
     def get_graph_snapshot(self) -> Optional[Dict[str, Any]]:
         """

@@ -200,10 +200,17 @@ class CameraRecorder:
 
         return filepath
     
-    def _capture_into_raw_bytes(self):
+    def _capture_into_raw_bytes(self, max_width=640, max_height=480, jpeg_quality=70):
         """
-        Start recording from the camera.
-        Captures images at specified intervals for the specified duration.
+        Capture a single frame from camera and return as compressed JPEG bytes.
+
+        Args:
+            max_width (int): Maximum width for downscaling (default 640)
+            max_height (int): Maximum height for downscaling (default 480)
+            jpeg_quality (int): JPEG compression quality 0-100 (default 70, lower = more compression)
+
+        Returns:
+            bytes: JPEG-encoded image data
         """
         print(f"Initializing camera...")
 
@@ -264,13 +271,43 @@ class CameraRecorder:
         print(f"\nStarting camera capture...")
         print("-" * 50)
 
-
+        buffer = None
         try:
             ret, frame = camera.read()
-            if not ret: raise Exception("Camera did not return a valid frame")
-            _, buffer = cv2.imencode('.jpg', frame)
+            if not ret:
+                raise Exception("Camera did not return a valid frame")
+
+            # Get original dimensions
+            height, width = frame.shape[:2]
+            original_size = height * width
+
+            # Downscale if image is too large
+            if width > max_width or height > max_height:
+                # Calculate scaling factor to fit within max dimensions while preserving aspect ratio
+                scale = min(max_width / width, max_height / height)
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+
+                frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
+                print(f"Downscaled from {width}x{height} to {new_width}x{new_height}")
+
+            # Encode as JPEG with specified quality
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
+            success, buffer = cv2.imencode('.jpg', frame, encode_param)
+
+            if not success:
+                raise Exception("Failed to encode image as JPEG")
+
+            # Convert to bytes
+            buffer = buffer.tobytes()
+
+            # Log compression stats
+            compressed_size_kb = len(buffer) / 1024
+            print(f"Compressed to {compressed_size_kb:.1f} KB (quality={jpeg_quality})")
+
         except Exception as e:
             print(f"Error capturing image: {e}")
+            raise
         finally:
             # Release the camera
             camera.release()
