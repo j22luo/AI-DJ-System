@@ -391,11 +391,11 @@ class MicDBFFrequencyMonitor:
 
         plt.tight_layout()
 
-        buf = io.BytesIO()
-        fig.savefig(buf, format="jpeg", quality=quality, optimize=True)
-        plt.close(fig)
-        buf.seek(0)
-        return buf.getvalue()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="jpeg", quality=quality, optimize=True)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
 
 
 
