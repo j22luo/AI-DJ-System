@@ -10,8 +10,9 @@ Mic dBFS + FFT Frequency Monitor (Server-Friendly)
 Designed for server/MCP usage:
     - start() / stop()
     - get_recent_data()
-    - get_graph_snapshot()
-    - get_graph_image() -> PNG bytes (for Claude / clients)
+    - get_graph_snapshot()      -> full-resolution graph data
+    - get_summary_snapshot()    -> just 5 values over the last window
+    - get_graph_image()         -> PNG bytes (for Claude / clients)
 
 Requirements:
     pip install numpy sounddevice matplotlib
@@ -58,11 +59,12 @@ class MicDBFFrequencyMonitor:
         (timestamp_iso: str, dbfs: float, spectral_centroid_hz: float)
 
     Public API:
-        start()               -> begin capturing
-        stop()                -> stop capturing
-        get_recent_data()     -> raw tuples
-        get_graph_snapshot()  -> JSON-like dict for last history_seconds
-        get_graph_image()     -> PNG bytes (graph of last history_seconds)
+        start()                -> begin capturing
+        stop()                 -> stop capturing
+        get_recent_data()      -> raw tuples (full resolution)
+        get_graph_snapshot()   -> full-resolution graph-friendly dict
+        get_summary_snapshot() -> 5-point summary over last N seconds
+        get_graph_image()      -> PNG bytes (graph of last history_seconds)
     """
 
     def __init__(
@@ -199,7 +201,7 @@ class MicDBFFrequencyMonitor:
         """
         Returns a list of:
             (timestamp_iso, dbfs_level, spectral_centroid_hz)
-        for roughly the last `history_seconds` seconds.
+        for roughly the last `history_seconds` seconds (full resolution).
         """
         return list(self._history)
 
@@ -207,10 +209,15 @@ class MicDBFFrequencyMonitor:
         """Clear all stored samples."""
         self._history.clear()
 
+    # ---------------------------------------------------------
+    # Full-resolution graph snapshot
+    # ---------------------------------------------------------
+
     def get_graph_snapshot(self) -> Optional[Dict[str, Any]]:
         """
         Return a snapshot of the last `history_seconds` worth of data,
-        in a graph-friendly format:
+        with full resolution (one point per 0.01s block), in a graph-
+        friendly format:
 
         {
           "duration_seconds": float,
@@ -263,62 +270,133 @@ class MicDBFFrequencyMonitor:
             "freq_axis": {"min": freq_min, "max": freq_max},
         }
 
-    def get_graph_image(self, width: int = 800, height: int = 400) -> Optional[bytes]:
-        """
-        Render a PNG image of the last `history_seconds` of data.
+    # ---------------------------------------------------------
+    # 5-value summary over last history_seconds
+    # ---------------------------------------------------------
 
-        Returns:
-            PNG bytes, or None if no data yet.
-
-        The image shows:
-          - Top subplot: dBFS over time (last N samples)
-          - Bottom subplot: frequency (spectral centroid in Hz) over time
+    def get_summary_snapshot(self, num_points: int = 5) -> Optional[Dict[str, Any]]:
         """
-        snapshot = self.get_graph_snapshot()
-        if snapshot is None:
+        Return a condensed snapshot with at most `num_points` summary values
+        over the last `history_seconds`. This is what you can feed to Claude
+        if you don't want hundreds of points.
+
+        Example structure:
+
+        {
+          "duration_seconds": 5.0,
+          "points": [
+            {"t": -4.0, "dbfs": -35.2, "freq_hz": 900.1},
+            {"t": -3.0, "dbfs": -30.7, "freq_hz": 1200.3},
+            ...
+            {"t":  0.0, "dbfs": -22.4, "freq_hz": 1700.8}
+          ],
+          "dbfs_axis": {"min": -80.0, "max": 0.0},
+          "freq_axis": {"min": 0.0, "max": sample_rate/2}
+        }
+        """
+        full = self.get_graph_snapshot()
+        if full is None:
             return None
 
-        points = snapshot["points"]
+        points = full["points"]
         if not points:
             return None
 
-        t_vals = [p["t"] for p in points]
-        db_vals = [p["dbfs"] for p in points]
-        freq_vals = [p["freq_hz"] for p in points]
+        n = len(points)
+        if n <= num_points:
+            # Already small, just return as-is
+            return {
+                "duration_seconds": full["duration_seconds"],
+                "points": points,
+                "dbfs_axis": full["dbfs_axis"],
+                "freq_axis": full["freq_axis"],
+            }
 
-        db_axis = snapshot["dbfs_axis"]
-        freq_axis = snapshot["freq_axis"]
+        # Group into num_points segments and average each
+        segment_points: List[Dict[str, float]] = []
+        for i in range(num_points):
+            start = int(i * n / num_points)
+            end = int((i + 1) * n / num_points)
+            segment = points[start:end]
+            if not segment:
+                continue
 
-        dpi = 100
-        fig, (ax1, ax2) = plt.subplots(
-            2, 1,
-            figsize=(width / dpi, height / dpi),
-            dpi=dpi,
-            sharex=True
-        )
+            t_vals = [p["t"] for p in segment]
+            db_vals = [p["dbfs"] for p in segment]
+            f_vals = [p["freq_hz"] for p in segment]
 
-        # Top: dBFS
-        ax1.plot(t_vals, db_vals, linewidth=1.0)
-        ax1.set_ylabel("dBFS")
-        ax1.set_ylim(db_axis["min"], db_axis["max"])
-        ax1.set_title(f"Last {snapshot['duration_seconds']:.1f}s – Loudness (dBFS)")
-        ax1.grid(True, linestyle=":", linewidth=0.5)
+            segment_points.append(
+                {
+                    "t": float(sum(t_vals) / len(t_vals)),
+                    "dbfs": float(sum(db_vals) / len(db_vals)),
+                    "freq_hz": float(sum(f_vals) / len(f_vals)),
+                }
+            )
 
-        # Bottom: Frequency
-        ax2.plot(t_vals, freq_vals, linewidth=1.0)
-        ax2.set_ylabel("Hz")
-        ax2.set_xlabel("Time (s, relative to now)")
-        ax2.set_ylim(freq_axis["min"], freq_axis["max"])
-        ax2.set_title(f"Last {snapshot['duration_seconds']:.1f}s – Spectral Centroid")
-        ax2.grid(True, linestyle=":", linewidth=0.5)
+        return {
+            "duration_seconds": full["duration_seconds"],
+            "points": segment_points,
+            "dbfs_axis": full["dbfs_axis"],
+            "freq_axis": full["freq_axis"],
+        }
 
-        plt.tight_layout()
+    # ---------------------------------------------------------
+    # Graph image (PNG) using full-resolution data
+    # ---------------------------------------------------------
 
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight")
-        plt.close(fig)
-        buf.seek(0)
-        return buf.getvalue()
+def get_graph_image(self, width: int = 800, height: int = 400, quality: int = 60) -> Optional[bytes]:
+    """
+    Render a JPEG image of the last history_seconds of data.
+    Compressed for LLM usage (default quality=60).
+
+    Returns JPEG bytes, or None if no data yet.
+    """
+    snapshot = self.get_graph_snapshot()
+    if snapshot is None:
+        return None
+
+    points = snapshot["points"]
+    if not points:
+        return None
+
+    t_vals = [p["t"] for p in points]
+    db_vals = [p["dbfs"] for p in points]
+    freq_vals = [p["freq_hz"] for p in points]
+
+    db_axis = snapshot["dbfs_axis"]
+    freq_axis = snapshot["freq_axis"]
+
+    dpi = 100
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1,
+        figsize=(width / dpi, height / dpi),
+        dpi=dpi,
+        sharex=True
+    )
+
+    # Top: dBFS
+    ax1.plot(t_vals, db_vals, linewidth=1.0)
+    ax1.set_ylabel("dBFS")
+    ax1.set_ylim(db_axis["min"], db_axis["max"])
+    ax1.set_title(f"Last {snapshot['duration_seconds']:.1f}s – Loudness (dBFS)")
+    ax1.grid(True, linestyle=":", linewidth=0.5)
+
+    # Bottom: Frequency
+    ax2.plot(t_vals, freq_vals, linewidth=1.0)
+    ax2.set_ylabel("Hz")
+    ax2.set_xlabel("Time (s, relative to now)")
+    ax2.set_ylim(freq_axis["min"], freq_axis["max"])
+    ax2.set_title(f"Last {snapshot['duration_seconds']:.1f}s – Spectral Centroid")
+    ax2.grid(True, linestyle=":", linewidth=0.5)
+
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="jpeg", quality=quality, optimize=True)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
 
 
 # -------------------------------------------------------------
@@ -344,16 +422,18 @@ if __name__ == "__main__":
     try:
         while True:
             time.sleep(1.0)
-            snap = monitor.get_graph_snapshot()
-            if snap is None or not snap["points"]:
+            summary = monitor.get_summary_snapshot(num_points=5)
+            if summary is None or not summary["points"]:
                 print("No data yet.")
             else:
-                last = snap["points"][-1]
-                print(
-                    f"Latest: t={last['t']:.2f}s, "
-                    f"dBFS={last['dbfs']:.1f}, "
-                    f"freq={last['freq_hz']:.1f} Hz"
-                )
+                print("Summary (5 points):")
+                for p in summary["points"]:
+                    print(
+                        f"  t={p['t']:.2f}s, "
+                        f"dBFS={p['dbfs']:.1f}, "
+                        f"freq={p['freq_hz']:.1f} Hz"
+                    )
+                print("-" * 40)
     except KeyboardInterrupt:
         print("\nStopping...")
         monitor.stop()

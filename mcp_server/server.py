@@ -35,7 +35,7 @@ async def list_tools() -> list[Tool]:
             name="get_party_sound",
             description=(
                 "Get a graph snapshot of the last 5 seconds of microphone audio. "
-                "Returns dBFS loudness and FFT-based spectral centroid, plus a "
+                "Returns 5 values of dBFS loudness and FFT-based spectral centroid, plus a "
                 "base64-encoded PNG image of the graph."
             ),
             inputSchema={"type": "object", "properties": {}, "required": []},
@@ -134,15 +134,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 result = await spotify_service.get_scheduled_play_tracks()
                 return [TextContent(type="text", text=json.dumps({"result" : result}))]
             case "get_party_sound":
-                snapshot = mic_monitor.get_graph_snapshot()
+                summary = mic_monitor.get_summary_snapshot(num_points=5)
                 image_bytes = mic_monitor.get_graph_image()
 
-                if snapshot is None or image_bytes is None:
+                if summary is None or image_bytes is None:
                     payload = {"error": "No audio data yet"}
                 else:
                     image_b64 = base64.b64encode(image_bytes).decode("ascii")
                     payload = {
-                        "graph": snapshot,  # structured numeric data
+                        "summary": summary,     # 5-point smoothed numeric data
                         "image": {
                             "mime_type": "image/png",
                             "base64": image_b64,
