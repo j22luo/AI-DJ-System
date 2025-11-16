@@ -1,5 +1,6 @@
 from mcp.server import Server
 from mcp.types import Tool, TextContent
+from mcp.types import ImageContent
 import asyncio
 import json
 from config import Config
@@ -135,24 +136,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 return [TextContent(type="text", text=json.dumps({"result" : result}))]
             case "get_party_sound":
                 summary = mic_monitor.get_summary_snapshot(num_points=5)
-                image_bytes = mic_monitor.get_graph_image()   # now returns JPEG bytes
+                image_bytes = mic_monitor.get_graph_image()
 
                 if summary is None or image_bytes is None:
-                    payload = {"error": "No audio data yet"}
-                else:
-                    image_b64 = base64.b64encode(image_bytes).decode("ascii")
-                    payload = {
-                        "summary": summary,     # 5-point smoothed numeric data
-                        "image": {
-                            "mime_type": "image/jpeg",   # changed from PNG → JPEG
-                            "base64": image_b64,
-                        },
-                    }
-
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({"error": "No audio data yet"}, indent=2),
+                        )
+                    ]
+                
+                # Return both the summary data AND the image
                 return [
                     TextContent(
                         type="text",
-                        text=json.dumps(payload, indent=2),
+                        text=json.dumps(summary, indent=2),
+                    ),
+                    ImageContent(
+                        type="image",
+                        data=base64.b64encode(image_bytes).decode("ascii"),
+                        mimeType="image/jpeg",
                     )
                 ]
 
@@ -164,26 +167,30 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     if image_bytes is None:
                         raise Exception("Camera returned no bytes")
 
-                    # Base64-encode
-                    image_b64 = base64.b64encode(image_bytes).decode("ascii")
-
-                    payload = {
-                        "success": True,
-                        "image": {
-                            "mime_type": "image/jpeg",   # JPEG = smaller size for Claude
-                            "base64": image_b64,
-                        },
-                    }
-
-                    return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+                    # Return the image directly so Claude can see it
+                    return [
+                        TextContent(
+                            type="text",
+                            text="Camera image captured successfully.",
+                        ),
+                        ImageContent(
+                            type="image",
+                            data=base64.b64encode(image_bytes).decode("ascii"),
+                            mimeType="image/jpeg",
+                        )
+                    ]
 
                 except Exception as e:
                     print(f"[Camera Error] {e}")
-                    payload = {
-                        "success": False,
-                        "error": str(e)
-                    }
-                    return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+                    return [
+                        TextContent(
+                            type="text",
+                            text=json.dumps({
+                                "success": False,
+                                "error": str(e)
+                            }, indent=2)
+                        )
+                    ]
 
                 
 
