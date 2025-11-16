@@ -135,7 +135,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 return [TextContent(type="text", text=json.dumps({"result" : result}))]
             case "get_party_sound":
                 summary = mic_monitor.get_summary_snapshot(num_points=5)
-                image_bytes = mic_monitor.get_graph_image()
+                image_bytes = mic_monitor.get_graph_image()   # now returns JPEG bytes
 
                 if summary is None or image_bytes is None:
                     payload = {"error": "No audio data yet"}
@@ -144,7 +144,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     payload = {
                         "summary": summary,     # 5-point smoothed numeric data
                         "image": {
-                            "mime_type": "image/png",
+                            "mime_type": "image/jpeg",   # changed from PNG → JPEG
                             "base64": image_b64,
                         },
                     }
@@ -155,19 +155,36 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         text=json.dumps(payload, indent=2),
                     )
                 ]
+
             case "take_picture":
                 try:
+                    # Capture raw frame (as JPEG bytes from your camera_recorder)
                     image_bytes = camera_recorder._capture_into_raw_bytes()
+
+                    if image_bytes is None:
+                        raise Exception("Camera returned no bytes")
+
+                    # Base64-encode
                     image_b64 = base64.b64encode(image_bytes).decode("ascii")
+
                     payload = {
-                        "success": True, # structured numeric data
-                        "mime_type": "image/png",
-                        "base64": image_b64,
+                        "success": True,
+                        "image": {
+                            "mime_type": "image/jpeg",   # JPEG = smaller size for Claude
+                            "base64": image_b64,
+                        },
                     }
-                    return [TextContent(type="text", text=json.dumps(payload))]
+
+                    return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+
                 except Exception as e:
-                    print(f"Error capturing or encoding image: {e}")
-                    return [TextContent(type="text", text=json.dumps({"success": False, "error": str(e)}))]
+                    print(f"[Camera Error] {e}")
+                    payload = {
+                        "success": False,
+                        "error": str(e)
+                    }
+                    return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+
                 
 
         # if name == "get_party_context":

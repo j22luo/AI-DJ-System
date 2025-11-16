@@ -18,7 +18,7 @@ class CameraRecorder:
         Args:
             output_dir (str): Directory to save camera images
             duration (int): Total recording duration in seconds
-            interval (int): Time interval between captures in seconds
+            interval (int): Time cainterval between captures in seconds
             camera_index (int): Camera device index (None for auto-detect, 0 for default camera)
             test_mode (bool): If True, use mock camera for testing in headless environments
         """
@@ -202,8 +202,11 @@ class CameraRecorder:
     
     def _capture_into_raw_bytes(self):
         """
-        Start recording from the camera.
-        Captures images at specified intervals for the specified duration.
+        Capture a single frame from the camera and return compressed JPEG bytes.
+
+        - Auto-detects / sets up camera (or mock).
+        - Resizes frame to a smaller width (e.g. 640px) to reduce size.
+        - Encodes as JPEG with reduced quality for LLM-friendliness.
         """
         print(f"Initializing camera...")
 
@@ -246,7 +249,7 @@ class CameraRecorder:
             self.test_mode = True
             self.camera_index = -1
 
-        # Set camera properties for better quality (optional)
+        # Set camera properties for better quality (we'll downscale later anyway)
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
@@ -261,16 +264,33 @@ class CameraRecorder:
 
         camera_type = "Mock Camera (Test Mode)" if self.test_mode else f"Camera {self.camera_index}"
         print(f"\n✓ Successfully initialized: {camera_type}")
-        print(f"\nStarting camera capture...")
+        print(f"\nStarting single-frame capture...")
         print("-" * 50)
 
+        buffer = None
 
         try:
             ret, frame = camera.read()
-            if not ret: raise Exception("Camera did not return a valid frame")
-            _, buffer = cv2.imencode('.jpg', frame)
+            if not ret:
+                raise Exception("Camera did not return a valid frame")
+
+            # --------- NEW: resize to smaller resolution for compression ----------
+            max_width = 640
+            h, w = frame.shape[:2]
+            if w > max_width:
+                scale = max_width / float(w)
+                new_size = (max_width, int(h * scale))
+                frame = cv2.resize(frame, new_size, interpolation=cv2.INTER_AREA)
+
+            # --------- NEW: JPEG encode with lower quality ----------
+            encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 60]  # 0–100, higher = better quality
+            success, buffer = cv2.imencode('.jpg', frame, encode_params)
+            if not success:
+                raise Exception("Failed to encode frame as JPEG")
+
         except Exception as e:
             print(f"Error capturing image: {e}")
+            raise
         finally:
             # Release the camera
             camera.release()
@@ -278,6 +298,7 @@ class CameraRecorder:
         print("-" * 50)
         print(f"Capture complete!")
 
+        # Returning the encoded JPEG bytes as a NumPy array (works with base64.b64encode)
         return buffer
 
     def record(self):
