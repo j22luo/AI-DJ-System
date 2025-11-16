@@ -11,6 +11,7 @@ dependencies = [
     "matplotlib>=3.10.7",
     "mcp[cli]>=1.21.1",
     "numpy>=2.3.4",
+    "opencv-python>=4.11.0.86",
     "services>=0.1.1",
     "sounddevice>=0.5.3",
     "spotipy>=2.25.1",

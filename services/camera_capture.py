@@ -199,6 +199,86 @@ class CameraRecorder:
             raise Exception(f"Failed to write image to {filepath}")
 
         return filepath
+    
+    def _capture_into_raw_bytes(self):
+        """
+        Start recording from the camera.
+        Captures images at specified intervals for the specified duration.
+        """
+        print(f"Initializing camera...")
+
+        # Initialize camera
+        camera = None
+
+        if self.test_mode:
+            print("Running in TEST MODE (no physical camera required)")
+            camera = self.create_mock_camera()
+            self.camera_index = -1  # Indicate mock camera
+        elif self.camera_index is not None:
+            # Try specific camera index with validation
+            print(f"Attempting to open camera index {self.camera_index}...")
+            import sys
+            if sys.platform.startswith("win"):
+                camera = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+            else:
+                camera = cv2.VideoCapture(self.camera_index)
+            if camera.isOpened():
+                # Validate that camera can provide valid frames
+                if not self._validate_camera(camera):
+                    print(f"⚠ Camera {self.camera_index} opened but cannot provide valid frames")
+                    camera.release()
+                    camera = None
+            else:
+                camera = None
+        else:
+            # Auto-detect camera
+            print("Auto-detecting camera...")
+            camera, detected_index = self.detect_camera()
+            if camera:
+                self.camera_index = detected_index
+
+        # If no camera found, fall back to test mode
+        if camera is None or not camera.isOpened():
+            print("\n⚠ No physical camera detected!")
+            print("Falling back to TEST MODE with mock camera...")
+            print("To use a physical camera, ensure it's connected and not in use.\n")
+            camera = self.create_mock_camera()
+            self.test_mode = True
+            self.camera_index = -1
+
+        # Set camera properties for better quality (optional)
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+        # Warm up camera by reading and discarding a few frames
+        if not self.test_mode:
+            print("Warming up camera...")
+            for i in range(5):
+                ret, _ = camera.read()
+                if not ret:
+                    print(f"⚠ Warning: Failed to read warmup frame {i+1}/5")
+            time.sleep(0.3)
+
+        camera_type = "Mock Camera (Test Mode)" if self.test_mode else f"Camera {self.camera_index}"
+        print(f"\n✓ Successfully initialized: {camera_type}")
+        print(f"\nStarting camera capture...")
+        print("-" * 50)
+
+
+        try:
+            ret, frame = camera.read()
+            if not ret: raise Exception("Camera did not return a valid frame")
+            _, buffer = cv2.imencode('.jpg', frame)
+        except Exception as e:
+            print(f"Error capturing image: {e}")
+        finally:
+            # Release the camera
+            camera.release()
+
+        print("-" * 50)
+        print(f"Capture complete!")
+
+        return buffer
 
     def record(self):
         """

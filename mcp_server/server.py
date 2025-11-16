@@ -6,15 +6,13 @@ from config import Config
 from services.spotify_service import SpotifyService
 from services.audio_analysis import MicDBFFrequencyMonitor
 import base64
-# from services.crowd_vision_service import CrowdVisionService
+from services.camera_capture import CameraRecorder
 # from shared.state_manager import state
 
 app = Server("houseparty-dj-mcp")
 
 # Initialize services
 spotify_service = SpotifyService()
-# crowd_service = CrowdVisionService()
-
 
 # ---- Microphone monitor setup ----
 mic_monitor = MicDBFFrequencyMonitor(
@@ -25,6 +23,11 @@ mic_monitor = MicDBFFrequencyMonitor(
 )
 mic_monitor.start()
 
+# ---- Camera Recorder setup ----
+camera_recorder = CameraRecorder()
+camera_recorder.detect_camera()
+camera_recorder.create_mock_camera()
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     return [
@@ -34,6 +37,14 @@ async def list_tools() -> list[Tool]:
                 "Get a graph snapshot of the last 5 seconds of microphone audio. "
                 "Returns dBFS loudness and FFT-based spectral centroid, plus a "
                 "base64-encoded PNG image of the graph."
+            ),
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="take_picture",
+            description=(
+                "Take a picture from the webcam"
+                "Returns a base64-encoded PNG image"
             ),
             inputSchema={"type": "object", "properties": {}, "required": []},
         ),
@@ -144,6 +155,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         text=json.dumps(payload, indent=2),
                     )
                 ]
+            case "take_picture":
+                try:
+                    image_bytes = camera_recorder._capture_into_raw_bytes()
+                    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                    payload = {
+                        "success": True, # structured numeric data
+                        "mime_type": "image/png",
+                        "base64": image_b64,
+                    }
+                    return [TextContent(type="text", text=json.dumps(payload))]
+                except Exception as e:
+                    print(f"Error capturing or encoding image: {e}")
+                    return [TextContent(type="text", text=json.dumps({"success": False, "error": str(e)}))]
+                
+
         # if name == "get_party_context":
         #     context = await state.get_state()
         #     return [TextContent(type="text", text=json.dumps(context, indent=2))]
