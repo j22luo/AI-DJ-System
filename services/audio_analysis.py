@@ -344,58 +344,59 @@ class MicDBFFrequencyMonitor:
     # Graph image (PNG) using full-resolution data
     # ---------------------------------------------------------
 
-def get_graph_image(self, width: int = 800, height: int = 400, quality: int = 60) -> Optional[bytes]:
-    """
-    Render a JPEG image of the last history_seconds of data.
-    Compressed for LLM usage (default quality=60).
+    def get_graph_image(self, width: int = 800, height: int = 400, quality: int = 60) -> Optional[bytes]:
+        """
+        Render a JPEG image of the last history_seconds of data.
+        Compressed for LLM usage (default quality=60).
 
-    Returns JPEG bytes, or None if no data yet.
-    """
-    snapshot = self.get_graph_snapshot()
-    if snapshot is None:
-        return None
+        Returns JPEG bytes, or None if no data yet.
+        """
+        snapshot = self.get_graph_snapshot()
+        if snapshot is None:
+            return None
 
-    points = snapshot["points"]
-    if not points:
-        return None
+        points = snapshot["points"]
+        if not points:
+            return None
 
-    t_vals = [p["t"] for p in points]
-    db_vals = [p["dbfs"] for p in points]
-    freq_vals = [p["freq_hz"] for p in points]
+        t_vals = [p["t"] for p in points]
+        db_vals = [p["dbfs"] for p in points]
+        freq_vals = [p["freq_hz"] for p in points]
 
-    db_axis = snapshot["dbfs_axis"]
-    freq_axis = snapshot["freq_axis"]
+        db_axis = snapshot["dbfs_axis"]
+        freq_axis = snapshot["freq_axis"]
 
-    dpi = 100
-    fig, (ax1, ax2) = plt.subplots(
-        2, 1,
-        figsize=(width / dpi, height / dpi),
-        dpi=dpi,
-        sharex=True
-    )
+        dpi = 100
+        fig, (ax1, ax2) = plt.subplots(
+            2, 1,
+            figsize=(width / dpi, height / dpi),
+            dpi=dpi,
+            sharex=True
+        )
 
-    # Top: dBFS
-    ax1.plot(t_vals, db_vals, linewidth=1.0)
-    ax1.set_ylabel("dBFS")
-    ax1.set_ylim(db_axis["min"], db_axis["max"])
-    ax1.set_title(f"Last {snapshot['duration_seconds']:.1f}s – Loudness (dBFS)")
-    ax1.grid(True, linestyle=":", linewidth=0.5)
+        # Top: dBFS
+        ax1.plot(t_vals, db_vals, linewidth=1.0)
+        ax1.set_ylabel("dBFS")
+        ax1.set_ylim(db_axis["min"], db_axis["max"])
+        ax1.set_title(f"Last {snapshot['duration_seconds']:.1f}s – Loudness (dBFS)")
+        ax1.grid(True, linestyle=":", linewidth=0.5)
 
-    # Bottom: Frequency
-    ax2.plot(t_vals, freq_vals, linewidth=1.0)
-    ax2.set_ylabel("Hz")
-    ax2.set_xlabel("Time (s, relative to now)")
-    ax2.set_ylim(freq_axis["min"], freq_axis["max"])
-    ax2.set_title(f"Last {snapshot['duration_seconds']:.1f}s – Spectral Centroid")
-    ax2.grid(True, linestyle=":", linewidth=0.5)
+        # Bottom: Frequency
+        ax2.plot(t_vals, freq_vals, linewidth=1.0)
+        ax2.set_ylabel("Hz")
+        ax2.set_xlabel("Time (s, relative to now)")
+        ax2.set_ylim(freq_axis["min"], freq_axis["max"])
+        ax2.set_title(f"Last {snapshot['duration_seconds']:.1f}s – Spectral Centroid")
+        ax2.grid(True, linestyle=":", linewidth=0.5)
 
-    plt.tight_layout()
+        plt.tight_layout()
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format="jpeg", quality=quality, optimize=True)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
+        buf = io.BytesIO()
+        # Matplotlib's JPEG backend uses pil_kwargs for quality control
+        fig.savefig(buf, format="jpeg", pil_kwargs={"quality": quality, "optimize": True})
+        plt.close(fig)
+        buf.seek(0)
+        return buf.getvalue()
 
 
 
